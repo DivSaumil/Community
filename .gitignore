@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# IDE-specific files
+.vscode/
+.idea/
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp           
+# OS-specific files
+.DS_Store
+Thumbs.db       
+
+# Other files to ignore
+*.env
+*.secret
+*.pem   
+*.key
+*.crt   
+
