@@ -15,14 +15,27 @@ router = APIRouter()
 admin_required = RoleChecker(["admin"])
 
 
-@router.post("", response_model=NoticeOut, status_code=status.HTTP_201_CREATED, dependencies=[Depends(admin_required)])
+@router.post("", response_model=NoticeOut, status_code=status.HTTP_201_CREATED)
 async def publish_notice(payload: NoticeCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Publish a new notice. If type is 'poll', options must be specified. Admin only."""
-    if payload.type == "poll" and (not payload.poll_options or len(payload.poll_options) < 2):
+    """Publish a new notice. If type is 'poll', options must be specified. Only admin can create polls."""
+    # Only admin, resident, and tenant can post notices
+    if current_user.role not in ["admin", "resident", "tenant"]:
         raise HTTPException(
-            status_code=400,
-            detail="A poll notice must include at least 2 options",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to publish notices",
         )
+        
+    if payload.type == "poll":
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can create interactive polls",
+            )
+        if not payload.poll_options or len(payload.poll_options) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A poll notice must include at least 2 options",
+            )
     return await crud_notices.create_notice(db, payload, current_user.id)
 
 

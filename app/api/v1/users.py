@@ -75,6 +75,32 @@ async def assign_occupants(
     return flat
 
 
+@router.get("/by-phone/{phone}", response_model=UserOut)
+async def get_user_by_phone_number(
+    phone: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retrieve details of any registered user by their phone number."""
+    user = await crud_users.get_user_by_phone(db, phone)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.get("/{user_id}", response_model=UserOut)
+async def get_user_by_id(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Retrieve details of any registered user by their ID."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
 @router.get("/staff", response_model=List[UserOut])
 async def list_society_staff(
     db: AsyncSession = Depends(get_db),

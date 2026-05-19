@@ -27,6 +27,14 @@ router = APIRouter()
 admin_required = RoleChecker(["admin"])
 admin_or_staff_required = RoleChecker(["admin", "staff"])
 
+def check_finance_access(current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["admin", "resident", "tenant"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Guards and staff cannot access financial information."
+        )
+    return current_user
+
 
 @router.post("/invoices", response_model=InvoiceOut, dependencies=[Depends(admin_required)])
 async def create_maintenance_invoice(payload: InvoiceCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -47,7 +55,7 @@ async def list_all_invoices(
 @router.get("/my-invoices", response_model=List[InvoiceOut])
 async def list_my_invoices(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(check_finance_access)
 ):
     """Retrieve invoices linked to flats occupied by the current resident/tenant."""
     # Find all flats where user is owner or tenant
@@ -66,7 +74,7 @@ async def list_my_invoices(
 
 
 @router.post("/pay", response_model=PaymentOut)
-async def pay_invoice(payload: PaymentCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def pay_invoice(payload: PaymentCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(check_finance_access)):
     """Process a mock invoice payment. Residents can pay their dues."""
     payment = await crud_finance.create_payment(db, payload, current_user.id)
     if not payment:
@@ -74,15 +82,15 @@ async def pay_invoice(payload: PaymentCreate, db: AsyncSession = Depends(get_db)
     return payment
 
 
-@router.post("/expenses", response_model=ExpenseOut, dependencies=[Depends(admin_or_staff_required)])
+@router.post("/expenses", response_model=ExpenseOut, dependencies=[Depends(admin_required)])
 async def record_expense(payload: ExpenseCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Record a society operation expense. Admin or staff only."""
+    """Record a society operation expense. Admin only."""
     return await crud_finance.create_expense(db, payload, current_user.id)
 
 
 @router.get("/expenses", response_model=List[ExpenseOut])
-async def list_expenses(category: str | None = None, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """List recorded society expenses. Accessible by all authenticated users."""
+async def list_expenses(category: str | None = None, db: AsyncSession = Depends(get_db), current_user: User = Depends(check_finance_access)):
+    """List recorded society expenses. Accessible by admin, resident, and tenant."""
     return await crud_finance.get_expenses(db, category)
 
 
@@ -93,12 +101,12 @@ async def create_budget_allocation(payload: BudgetCreate, db: AsyncSession = Dep
 
 
 @router.get("/budgets", response_model=List[BudgetOut])
-async def list_budgets(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """List overall budgets allocations."""
+async def list_budgets(db: AsyncSession = Depends(get_db), current_user: User = Depends(check_finance_access)):
+    """List overall budgets allocations. Accessible by admin, resident, and tenant."""
     return await crud_finance.get_budgets(db)
 
 
 @router.get("/summary", response_model=FinancialSummary)
-async def get_financial_dashboard(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Get overall society financial transparency summary figures."""
+async def get_financial_dashboard(db: AsyncSession = Depends(get_db), current_user: User = Depends(check_finance_access)):
+    """Get overall society financial transparency summary figures. Accessible by admin, resident, and tenant."""
     return await crud_finance.get_financial_summary(db)
