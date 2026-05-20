@@ -34,6 +34,8 @@ async def update_user(db: AsyncSession, db_user: User, user_in: UserUpdate) -> U
         db_user.role = user_in.role
     if user_in.is_active is not None:
         db_user.is_active = user_in.is_active
+    if hasattr(user_in, "vehicle_number") and user_in.vehicle_number is not None:
+        db_user.vehicle_number = user_in.vehicle_number
     await db.commit()
     await db.refresh(db_user)
     return db_user

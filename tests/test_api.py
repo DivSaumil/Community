@@ -40,7 +40,27 @@ async def test_otp_flow(client):
     assert response_verify.status_code == 200
     token_data = response_verify.json()
     assert "access_token" in token_data
+    assert "refresh_token" in token_data
     assert token_data["role"] == "resident"  # default auto-registered role
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_flow(client):
+    response_verify = await client.post(
+        "/api/v1/auth/otp/verify", 
+        json={"phone": "+918888888888", "otp": "123456"}
+    )
+    assert response_verify.status_code == 200
+    token_data = response_verify.json()
+    refresh_token = token_data["refresh_token"]
+    
+    response_refresh = await client.post(
+        f"/api/v1/auth/refresh?refresh_token={refresh_token}"
+    )
+    assert response_refresh.status_code == 200
+    new_token_data = response_refresh.json()
+    assert "access_token" in new_token_data
+    assert "refresh_token" in new_token_data
 
 
 @pytest.mark.asyncio

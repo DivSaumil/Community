@@ -41,6 +41,8 @@ async def get_all_complaints(
     status: str | None = None,
     category: str | None = None,
     priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0
 ) -> list[Complaint]:
     query = select(Complaint).options(selectinload(Complaint.comments))
     if flat_id:
@@ -56,7 +58,7 @@ async def get_all_complaints(
     if priority:
         query = query.where(Complaint.priority == priority)
         
-    query = query.order_by(Complaint.created_at.desc())
+    query = query.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
 

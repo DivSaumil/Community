@@ -1,8 +1,7 @@
 import uuid
-import random
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.finance import Invoice, Payment, Expense, Budget
 from app.schemas.finance import InvoiceCreate, PaymentCreate, ExpenseCreate, BudgetCreate
@@ -24,19 +23,25 @@ async def create_invoice(db: AsyncSession, invoice_in: InvoiceCreate, admin_id: 
 
 
 async def get_invoice(db: AsyncSession, invoice_id: uuid.UUID) -> Invoice | None:
-    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
+    result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.is_deleted == False)
+    )
     return result.scalar_one_or_none()
 
 
 async def get_all_invoices(
-    db: AsyncSession, flat_id: uuid.UUID | None = None, status: str | None = None
+    db: AsyncSession, 
+    flat_id: uuid.UUID | None = None, 
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0
 ) -> list[Invoice]:
-    query = select(Invoice)
+    query = select(Invoice).where(Invoice.is_deleted == False)
     if flat_id:
         query = query.where(Invoice.flat_id == flat_id)
     if status:
         query = query.where(Invoice.status == status)
-    query = query.order_by(Invoice.due_date.desc())
+    query = query.order_by(Invoice.due_date.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -47,8 +52,12 @@ async def create_payment(db: AsyncSession, payment_in: PaymentCreate, user_id: u
     if not invoice:
         return None
         
-    # Generate receipt number
-    receipt_num = f"REC-{datetime.now().strftime('%Y%m%d')}-{random.randint(1000, 9999)}"
+    # Ensure receipt number sequence exists and get next value
+    await db.execute(text("CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1000"))
+    seq_res = await db.execute(text("SELECT nextval('receipt_number_seq')"))
+    seq_val = seq_res.scalar()
+    
+    receipt_num = f"REC-{datetime.now().strftime('%Y%m%d')}-{seq_val}"
     
     db_payment = Payment(
         invoice_id=payment_in.invoice_id,
@@ -62,8 +71,6 @@ async def create_payment(db: AsyncSession, payment_in: PaymentCreate, user_id: u
     )
     
     # Update invoice status
-    # Simple logic: if payment amount matches or exceeds invoice amount (plus late fee), mark paid.
-    # Otherwise partially_paid.
     total_due = invoice.amount + invoice.late_fee
     if payment_in.amount >= total_due:
         invoice.status = "paid"
@@ -74,6 +81,42 @@ async def create_payment(db: AsyncSession, payment_in: PaymentCreate, user_id: u
     await db.commit()
     await db.refresh(db_payment)
     return db_payment
+
+
+async def get_payment(db: AsyncSession, payment_id: uuid.UUID) -> Payment | None:
+    result = await db.execute(
+        select(Payment).where(Payment.id == payment_id, Payment.is_deleted == False)
+    )
+    return result.scalar_one_or_none()
+
+
+async def soft_delete_invoice(db: AsyncSession, invoice_id: uuid.UUID) -> bool:
+    invoice = await get_invoice(db, invoice_id)
+    if not invoice:
+        return False
+    invoice.is_deleted = True
+    invoice.deleted_at = datetime.now(timezone.utc)
+    # Also soft-delete all payments associated with this invoice
+    await db.execute(
+        text("UPDATE payments SET is_deleted = :is_del, deleted_at = :del_at WHERE invoice_id = :inv_id")
+        .bindparams(is_del=True, del_at=datetime.now(timezone.utc), inv_id=invoice_id)
+    )
+    await db.commit()
+    return True
+
+
+async def soft_delete_payment(db: AsyncSession, payment_id: uuid.UUID) -> bool:
+    payment = await get_payment(db, payment_id)
+    if not payment:
+        return False
+    payment.is_deleted = True
+    payment.deleted_at = datetime.now(timezone.utc)
+    # If a payment is deleted, revert invoice status back to unpaid (or recalculate)
+    invoice = await db.get(Invoice, payment.invoice_id)
+    if invoice:
+        invoice.status = "unpaid"
+    await db.commit()
+    return True
 
 
 async def create_expense(db: AsyncSession, expense_in: ExpenseCreate, user_id: uuid.UUID) -> Expense:
@@ -92,11 +135,16 @@ async def create_expense(db: AsyncSession, expense_in: ExpenseCreate, user_id: u
     return db_expense
 
 
-async def get_expenses(db: AsyncSession, category: str | None = None) -> list[Expense]:
+async def get_expenses(
+    db: AsyncSession, 
+    category: str | None = None,
+    limit: int = 100,
+    offset: int = 0
+) -> list[Expense]:
     query = select(Expense)
     if category:
         query = query.where(Expense.category == category)
-    query = query.order_by(Expense.spent_date.desc())
+    query = query.order_by(Expense.spent_date.desc()).offset(offset).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -114,42 +162,42 @@ async def create_budget(db: AsyncSession, budget_in: BudgetCreate) -> Budget:
     return db_budget
 
 
-async def get_budgets(db: AsyncSession) -> list[Budget]:
-    result = await db.execute(select(Budget).order_by(Budget.start_date.desc()))
+async def get_budgets(
+    db: AsyncSession,
+    limit: int = 100,
+    offset: int = 0
+) -> list[Budget]:
+    result = await db.execute(
+        select(Budget).order_by(Budget.start_date.desc()).offset(offset).limit(limit)
+    )
     return list(result.scalars().all())
 
 
 async def get_financial_summary(db: AsyncSession) -> dict:
-    # 1. Total billed
-    res_billed = await db.execute(select(func.sum(Invoice.amount)))
-    total_billed = res_billed.scalar() or Decimal("0.00")
-    
-    # 2. Total collected
-    res_collected = await db.execute(
-        select(func.sum(Payment.amount)).where(Payment.status == "completed")
+    # Single query database aggregation using subqueries
+    stmt = select(
+        select(func.coalesce(func.sum(Invoice.amount), 0)).where(Invoice.is_deleted == False).scalar_subquery().label("total_billed"),
+        select(func.coalesce(func.sum(Payment.amount), 0)).where(Payment.status == "completed", Payment.is_deleted == False).scalar_subquery().label("total_collected"),
+        select(func.coalesce(func.sum(Invoice.amount + Invoice.late_fee), 0)).where(Invoice.status != "paid", Invoice.is_deleted == False).scalar_subquery().label("total_pending"),
+        select(func.coalesce(func.sum(Expense.amount), 0)).scalar_subquery().label("total_expenses"),
+        select(func.count(Invoice.id)).where(Invoice.status != "paid", Invoice.is_deleted == False).scalar_subquery().label("pending_invoices_count")
     )
-    total_collected = res_collected.scalar() or Decimal("0.00")
+    res = await db.execute(stmt)
+    row = res.fetchone()
     
-    # 3. Total pending (amount + late_fee where status is unpaid/partially_paid/overdue)
-    res_pending = await db.execute(
-        select(func.sum(Invoice.amount + Invoice.late_fee)).where(Invoice.status != "paid")
-    )
-    total_pending = res_pending.scalar() or Decimal("0.00")
-    
-    # 4. Total expenses
-    res_expenses = await db.execute(select(func.sum(Expense.amount)))
-    total_expenses = res_expenses.scalar() or Decimal("0.00")
-    
-    # 5. Pending invoices count
-    res_count = await db.execute(
-        select(func.count(Invoice.id)).where(Invoice.status != "paid")
-    )
-    pending_count = res_count.scalar() or 0
-    
+    if not row:
+        return {
+            "total_billed": Decimal("0.00"),
+            "total_collected": Decimal("0.00"),
+            "total_pending": Decimal("0.00"),
+            "total_expenses": Decimal("0.00"),
+            "pending_invoices_count": 0,
+        }
+        
     return {
-        "total_billed": total_billed,
-        "total_collected": total_collected,
-        "total_pending": total_pending,
-        "total_expenses": total_expenses,
-        "pending_invoices_count": pending_count,
+        "total_billed": row.total_billed,
+        "total_collected": row.total_collected,
+        "total_pending": row.total_pending,
+        "total_expenses": row.total_expenses,
+        "pending_invoices_count": row.pending_invoices_count,
     }

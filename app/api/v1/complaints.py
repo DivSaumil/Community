@@ -49,6 +49,8 @@ async def list_complaints(
     status: str | None = None,
     category: str | None = None,
     priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -59,7 +61,7 @@ async def list_complaints(
     """
     if current_user.role in ["admin", "staff"]:
         return await crud_complaints.get_all_complaints(
-            db, status=status, category=category, priority=priority
+            db, status=status, category=category, priority=priority, limit=limit, offset=offset
         )
     else:
         # Find user's flats
@@ -85,7 +87,7 @@ async def list_complaints(
         if priority:
             query = query.where(Complaint.priority == priority)
             
-        query = query.order_by(Complaint.created_at.desc())
+        query = query.order_by(Complaint.created_at.desc()).offset(offset).limit(limit)
         res = await db.execute(query)
         return list(res.scalars().all())
 

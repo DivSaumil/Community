@@ -3,12 +3,13 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, RoleChecker
 from app.crud import users as crud_users
 from app.models.users import User
-from app.schemas.users import UserOut, UserCreate, FlatOut, FlatCreate
+from app.schemas.users import UserOut, UserCreate, FlatOut, FlatCreate, UserUpdate
 
 router = APIRouter()
 
@@ -16,10 +17,46 @@ router = APIRouter()
 admin_required = RoleChecker(["admin"])
 
 
+async def enrich_user_out(db: AsyncSession, db_user: User) -> UserOut:
+    """Helper to load flat relations and construct enriched UserOut schema."""
+    result = await db.execute(
+        select(User)
+        .where(User.id == db_user.id)
+        .options(selectinload(User.owned_flats), selectinload(User.rented_flats))
+    )
+    user = result.scalar_one()
+    
+    flats_list = []
+    for f in user.owned_flats:
+        flats_list.append(f"{f.block}-{f.flat_number}")
+    for f in user.rented_flats:
+        flats_list.append(f"{f.block}-{f.flat_number}")
+        
+    user_out = UserOut.model_validate(user)
+    user_out.flats = sorted(list(set(flats_list)))
+    return user_out
+
+
 @router.get("/me", response_model=UserOut)
-async def read_user_me(current_user: User = Depends(get_current_user)):
+async def read_user_me(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retrieve the current logged-in user's profile."""
-    return current_user
+    return await enrich_user_out(db, current_user)
+
+
+@router.put("/me", response_model=UserOut)
+async def update_user_me(
+    payload: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update the current user's profile details (e.g. name, vehicle_number)."""
+    # Prevent non-admin users from updating their role or active status
+    if current_user.role != "admin":
+        payload.role = None
+        payload.is_active = None
+        
+    updated = await crud_users.update_user(db, current_user, payload)
+    return await enrich_user_out(db, updated)
 
 
 @router.post("/register", response_model=UserOut, dependencies=[Depends(admin_required)])
@@ -34,7 +71,8 @@ async def register_user_manually(payload: UserCreate, db: AsyncSession = Depends
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Phone number already registered",
         )
-    return await crud_users.create_user(db, payload)
+    user = await crud_users.create_user(db, payload)
+    return await enrich_user_out(db, user)
 
 
 @router.get("/flats", response_model=List[FlatOut])
@@ -85,7 +123,7 @@ async def get_user_by_phone_number(
     user = await crud_users.get_user_by_phone(db, phone)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return await enrich_user_out(db, user)
 
 
 @router.get("/{user_id}", response_model=UserOut)
@@ -98,7 +136,7 @@ async def get_user_by_id(
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return await enrich_user_out(db, user)
 
 
 @router.get("/staff", response_model=List[UserOut])
@@ -108,4 +146,8 @@ async def list_society_staff(
 ):
     """List all staff/vendor accounts (e.g. electricians, plumbers)."""
     result = await db.execute(select(User).where(User.role == "staff"))
-    return list(result.scalars().all())
+    users = result.scalars().all()
+    enriched = []
+    for u in users:
+        enriched.append(await enrich_user_out(db, u))
+    return enriched

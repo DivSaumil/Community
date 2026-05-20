@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from app.models.visitors import VisitorPass, VisitorLog, DailyHelp, DailyHelpFlat
 from app.schemas.visitors import VisitorPassCreate, VisitorLogCreate, DailyHelpCreate
 
@@ -11,34 +12,34 @@ from app.schemas.visitors import VisitorPassCreate, VisitorLogCreate, DailyHelpC
 async def create_visitor_pass(
     db: AsyncSession, pass_in: VisitorPassCreate, resident_id: uuid.UUID
 ) -> VisitorPass:
-    # Generate 6-digit unique pass code
-    pass_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
-    
-    # Check uniqueness
-    while True:
-        res = await db.execute(select(VisitorPass).where(VisitorPass.pass_code == pass_code))
-        if not res.scalar_one_or_none():
-            break
-        pass_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
-        
     valid_until = pass_in.valid_until or (pass_in.expected_arrival + timedelta(hours=24))
     
-    db_pass = VisitorPass(
-        flat_id=pass_in.flat_id,
-        resident_id=resident_id,
-        name=pass_in.name,
-        phone=pass_in.phone,
-        visitor_type=pass_in.visitor_type,
-        pass_code=pass_code,
-        vehicle_number=pass_in.vehicle_number,
-        expected_arrival=pass_in.expected_arrival,
-        valid_until=valid_until,
-        status="active",
-    )
-    db.add(db_pass)
-    await db.commit()
-    await db.refresh(db_pass)
-    return db_pass
+    for attempt in range(10):
+        # Generate 6-digit unique pass code
+        pass_code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        db_pass = VisitorPass(
+            flat_id=pass_in.flat_id,
+            resident_id=resident_id,
+            name=pass_in.name,
+            phone=pass_in.phone,
+            visitor_type=pass_in.visitor_type,
+            pass_code=pass_code,
+            vehicle_number=pass_in.vehicle_number,
+            expected_arrival=pass_in.expected_arrival,
+            valid_until=valid_until,
+            status="active",
+        )
+        db.add(db_pass)
+        try:
+            await db.commit()
+            await db.refresh(db_pass)
+            return db_pass
+        except IntegrityError:
+            await db.rollback()
+            continue
+            
+    raise RuntimeError("Failed to generate a unique visitor passcode after 10 attempts.")
 
 
 async def get_visitor_pass_by_code(db: AsyncSession, code: str) -> VisitorPass | None:
@@ -46,11 +47,18 @@ async def get_visitor_pass_by_code(db: AsyncSession, code: str) -> VisitorPass |
     return result.scalar_one_or_none()
 
 
-async def get_visitor_passes_by_resident(db: AsyncSession, resident_id: uuid.UUID) -> list[VisitorPass]:
+async def get_visitor_passes_by_resident(
+    db: AsyncSession, 
+    resident_id: uuid.UUID,
+    limit: int = 100,
+    offset: int = 0
+) -> list[VisitorPass]:
     result = await db.execute(
         select(VisitorPass)
         .where(VisitorPass.resident_id == resident_id)
         .order_by(VisitorPass.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     return list(result.scalars().all())
 
@@ -156,49 +164,75 @@ async def log_visitor_exit(
     return None
 
 
-async def get_active_gate_logs(db: AsyncSession) -> list[VisitorLog]:
+async def get_active_gate_logs(
+    db: AsyncSession,
+    limit: int = 100,
+    offset: int = 0
+) -> list[VisitorLog]:
     result = await db.execute(
-        select(VisitorLog).where(VisitorLog.exit_time == None).order_by(VisitorLog.entry_time.desc())
+        select(VisitorLog)
+        .where(VisitorLog.exit_time == None)
+        .order_by(VisitorLog.entry_time.desc())
+        .offset(offset)
+        .limit(limit)
     )
     return list(result.scalars().all())
 
 
-async def get_gate_logs_history(db: AsyncSession) -> list[VisitorLog]:
-    result = await db.execute(select(VisitorLog).order_by(VisitorLog.entry_time.desc()))
+async def get_gate_logs_history(
+    db: AsyncSession,
+    limit: int = 100,
+    offset: int = 0
+) -> list[VisitorLog]:
+    result = await db.execute(
+        select(VisitorLog)
+        .order_by(VisitorLog.entry_time.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     return list(result.scalars().all())
 
 
 async def create_daily_help(db: AsyncSession, help_in: DailyHelpCreate) -> DailyHelp:
-    # Generate unique 6-digit recurring passcode starting with DH
-    pass_code = "DH" + "".join([str(random.randint(0, 9)) for _ in range(4)])
-    while True:
-        res = await db.execute(select(DailyHelp).where(DailyHelp.pass_code == pass_code))
-        if not res.scalar_one_or_none():
-            break
+    for attempt in range(10):
+        # Generate unique 6-digit recurring passcode starting with DH
         pass_code = "DH" + "".join([str(random.randint(0, 9)) for _ in range(4)])
         
-    db_help = DailyHelp(
-        name=help_in.name,
-        phone=help_in.phone,
-        role=help_in.role,
-        pass_code=pass_code,
-        is_active=True,
-    )
-    db.add(db_help)
-    await db.flush()
-    
-    # Assign flats
-    for f_id in help_in.flat_ids:
-        association = DailyHelpFlat(daily_help_id=db_help.id, flat_id=f_id)
-        db.add(association)
+        db_help = DailyHelp(
+            name=help_in.name,
+            phone=help_in.phone,
+            role=help_in.role,
+            pass_code=pass_code,
+            is_active=True,
+        )
+        db.add(db_help)
         
-    await db.commit()
-    await db.refresh(db_help, ["flats"])
-    return db_help
+        # Assign flats
+        for f_id in help_in.flat_ids:
+            association = DailyHelpFlat(daily_help_id=db_help.id, flat_id=f_id)
+            db.add(association)
+            
+        try:
+            await db.commit()
+            await db.refresh(db_help, ["flats"])
+            return db_help
+        except IntegrityError:
+            await db.rollback()
+            continue
+            
+    raise RuntimeError("Failed to generate a unique daily help passcode after 10 attempts.")
 
 
-async def get_all_daily_helps(db: AsyncSession) -> list[DailyHelp]:
+async def get_all_daily_helps(
+    db: AsyncSession,
+    limit: int = 100,
+    offset: int = 0
+) -> list[DailyHelp]:
     result = await db.execute(
-        select(DailyHelp).options(selectinload(DailyHelp.flats)).order_by(DailyHelp.name)
+        select(DailyHelp)
+        .options(selectinload(DailyHelp.flats))
+        .order_by(DailyHelp.name)
+        .offset(offset)
+        .limit(limit)
     )
     return list(result.scalars().all())

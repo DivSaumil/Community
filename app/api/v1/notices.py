@@ -40,9 +40,14 @@ async def publish_notice(payload: NoticeCreate, db: AsyncSession = Depends(get_d
 
 
 @router.get("", response_model=List[NoticeOut])
-async def list_active_notices(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def list_active_notices(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
     """Retrieve all active (unexpired) notices."""
-    return await crud_notices.get_all_notices(db)
+    return await crud_notices.get_all_notices(db, limit=limit, offset=offset)
 
 
 @router.get("/{notice_id}", response_model=NoticeOut)

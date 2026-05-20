@@ -35,7 +35,8 @@ async def get_current_user(
         raise credentials_exception
         
     user_id_str: str = payload.get("sub")
-    if user_id_str is None:
+    token_role: str = payload.get("role")
+    if user_id_str is None or token_role is None:
         raise credentials_exception
         
     try:
@@ -49,6 +50,13 @@ async def get_current_user(
     
     if user is None:
         raise credentials_exception
+        
+    if user.role != token_role:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Role mismatch or user role updated. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
         
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")

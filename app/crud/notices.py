@@ -49,12 +49,18 @@ async def get_notice(db: AsyncSession, notice_id: uuid.UUID) -> Notice | None:
     return notice
 
 
-async def get_all_notices(db: AsyncSession) -> list[Notice]:
+async def get_all_notices(
+    db: AsyncSession,
+    limit: int = 100,
+    offset: int = 0
+) -> list[Notice]:
     query = (
         select(Notice)
         .where((Notice.expires_at == None) | (Notice.expires_at > datetime.now(timezone.utc)))
         .options(selectinload(Notice.poll_options))
         .order_by(Notice.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     result = await db.execute(query)
     notices = list(result.scalars().all())
