@@ -7,7 +7,13 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,  # Set to True to log SQL statements
-    pool_pre_ping=True,
+    pool_pre_ping=True,  # Verify connections are alive before use
+    # Connection pool tuning for 2GB Droplet with 3 Uvicorn workers:
+    # Each worker gets pool_size connections — total max = workers × (pool_size + max_overflow)
+    pool_size=5,           # Persistent connections per worker
+    max_overflow=10,       # Extra connections allowed under burst load
+    pool_timeout=30,       # Seconds to wait for a connection before raising
+    pool_recycle=1800,     # Recycle connections every 30 min (avoids stale conn issues)
 )
 
 # Async session maker

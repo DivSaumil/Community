@@ -1,0 +1,52 @@
+# Exclude large/unnecessary directories from the Docker build context
+# This significantly speeds up `docker build` and keeps images lean.
+
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+
+# Test files (not needed at runtime)
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+
+# Version control
+.git/
+.gitignore
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# uv lock file (we use requirements.txt in Docker)
+uv.lock
+
+# Python version file (Docker uses the base image)
+.python-version
+
+# Local docs (not needed at runtime)
+README.md
+deployment_guide.md

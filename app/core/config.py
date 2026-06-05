@@ -22,9 +22,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15  # Short-lived (15 minutes)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7    # Long-lived (7 days)
-    
-    # OTP
-    MOCK_OTP: str = "123456"
+
+    # Uvicorn workers — set via WORKERS env var in production
+    # Recommended: (2 × vCPU) + 1
+    WORKERS: int = 3
+
+    # OTP — leave empty in production to enforce real OTP flow
+    MOCK_OTP: str = ""
     
     # CORS
     BACKEND_CORS_ORIGINS: Union[List[str], str] = []
@@ -37,6 +41,22 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return v
         return []
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_db_url(cls, v: str) -> str:
+        if not v:
+            return v
+        # Convert postgres:// or postgresql:// to postgresql+asyncpg:// for asyncpg driver
+        if v.startswith("postgres://"):
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        
+        # asyncpg compatibility: replace sslmode=require with ssl=require
+        if "sslmode=" in v:
+            v = v.replace("sslmode=", "ssl=")
+        return v
 
 
 settings = Settings()
