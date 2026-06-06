@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     # OTP — leave empty in production to enforce real OTP flow
     MOCK_OTP: str = ""
     
+    # SMTP Email Settings
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SMTP_FROM_NAME: str = "Co-Habitat"
+    SMTP_TLS: bool = True
+    SMTP_SSL: bool = False
+    
     # CORS
     BACKEND_CORS_ORIGINS: Union[List[str], str] = []
 

@@ -10,14 +10,14 @@ async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     return result.scalar_one_or_none()
 
 
-async def get_user_by_phone(db: AsyncSession, phone: str) -> User | None:
-    result = await db.execute(select(User).where(User.phone == phone))
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    result = await db.execute(select(User).where(User.email == email))
     return result.scalar_one_or_none()
 
 
 async def create_user(db: AsyncSession, user_in: UserCreate) -> User:
     db_user = User(
-        phone=user_in.phone,
+        email=user_in.email,
         name=user_in.name,
         role=user_in.role,
     )

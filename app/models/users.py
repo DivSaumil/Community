@@ -9,7 +9,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    phone: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(150), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="resident")  # admin, resident, tenant, security, staff
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

@@ -65,11 +65,11 @@ async def register_user_manually(payload: UserCreate, db: AsyncSession = Depends
     Onboard/Register a new user manually.
     Only accessible by Admin.
     """
-    existing_user = await crud_users.get_user_by_phone(db, payload.phone)
+    existing_user = await crud_users.get_user_by_email(db, payload.email)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Phone number already registered",
+            detail="Email address already registered",
         )
     user = await crud_users.create_user(db, payload)
     return await enrich_user_out(db, user)
@@ -113,14 +113,14 @@ async def assign_occupants(
     return flat
 
 
-@router.get("/by-phone/{phone}", response_model=UserOut)
-async def get_user_by_phone_number(
-    phone: str,
+@router.get("/by-email/{email}", response_model=UserOut)
+async def get_user_by_email_address(
+    email: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Retrieve details of any registered user by their phone number."""
-    user = await crud_users.get_user_by_phone(db, phone)
+    """Retrieve details of any registered user by their email address."""
+    user = await crud_users.get_user_by_email(db, email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return await enrich_user_out(db, user)

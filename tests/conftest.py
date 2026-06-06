@@ -78,11 +78,11 @@ async def seed_test_db(session):
     await session.commit()
     
     # Seed core seed data required by tests
-    admin = User(phone="+919999999999", name="RWA President", role="admin")
-    resident_user = User(phone="+918888888888", name="Amit Kumar", role="resident")
-    tenant_user = User(phone="+917777777777", name="Suresh Patel", role="tenant")
-    security_guard = User(phone="+916666666666", name="Ram Singh", role="security")
-    staff_user = User(phone="+915555555555", name="Ravi Electrician", role="staff")
+    admin = User(email="admin@cohabitat.com", name="RWA President", role="admin")
+    resident_user = User(email="resident@cohabitat.com", name="Amit Kumar", role="resident")
+    tenant_user = User(email="tenant@cohabitat.com", name="Suresh Patel", role="tenant")
+    security_guard = User(email="guard@cohabitat.com", name="Ram Singh", role="security")
+    staff_user = User(email="staff@cohabitat.com", name="Ravi Electrician", role="staff")
     
     session.add_all([admin, resident_user, tenant_user, security_guard, staff_user])
     await session.flush()

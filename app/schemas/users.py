@@ -2,7 +2,7 @@ import uuid
 import enum
 import re
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, EmailStr
 
 
 class UserRole(str, enum.Enum):
@@ -33,17 +33,9 @@ class FlatOut(FlatBase):
 
 
 class UserBase(BaseModel):
-    phone: str = Field(..., max_length=20, examples=["+919999999999"])
+    email: EmailStr = Field(..., examples=["resident@example.com"])
     name: str = Field(..., max_length=100, examples=["Rahul Sharma"])
     role: UserRole = Field(UserRole.RESIDENT, description="admin, resident, tenant, security, staff")
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        v = v.strip()
-        if not re.match(r"^\+[1-9]\d{1,14}$", v):
-            raise ValueError("Phone number must be in E.164 format (e.g. +919999999999)")
-        return v
 
 
 class UserCreate(UserBase):
@@ -68,28 +60,12 @@ class UserOut(UserBase):
 
 
 class OTPRequest(BaseModel):
-    phone: str = Field(..., examples=["+919999999999"])
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        v = v.strip()
-        if not re.match(r"^\+[1-9]\d{1,14}$", v):
-            raise ValueError("Phone number must be in E.164 format (e.g. +919999999999)")
-        return v
+    email: EmailStr = Field(..., examples=["resident@example.com"])
 
 
 class OTPVerify(BaseModel):
-    phone: str = Field(..., examples=["+919999999999"])
+    email: EmailStr = Field(..., examples=["resident@example.com"])
     otp: str = Field(..., examples=["123456"])
-
-    @field_validator("phone")
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        v = v.strip()
-        if not re.match(r"^\+[1-9]\d{1,14}$", v):
-            raise ValueError("Phone number must be in E.164 format (e.g. +919999999999)")
-        return v
 
 
 class Token(BaseModel):

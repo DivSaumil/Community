@@ -10,10 +10,10 @@ from app.models.visitors import VisitorPass, VisitorLog
 
 
 # Helpers
-async def get_auth_headers(client, phone: str, otp: str = "123456"):
+async def get_auth_headers(client, email: str, otp: str = "123456"):
     response = await client.post(
         "/api/v1/auth/otp/verify", 
-        json={"phone": phone, "otp": otp}
+        json={"email": email, "otp": otp}
     )
     assert response.status_code == 200
     token = response.json()["access_token"]
@@ -25,7 +25,7 @@ async def test_otp_flow(client):
     # 1. Request OTP
     response = await client.post(
         "/api/v1/auth/otp/request", 
-        json={"phone": "+919991112222"}
+        json={"email": "new_resident@cohabitat.com"}
     )
     assert response.status_code == 200
     data = response.json()
@@ -35,7 +35,7 @@ async def test_otp_flow(client):
     # 2. Verify OTP
     response_verify = await client.post(
         "/api/v1/auth/otp/verify", 
-        json={"phone": "+919991112222", "otp": otp}
+        json={"email": "new_resident@cohabitat.com", "otp": otp}
     )
     assert response_verify.status_code == 200
     token_data = response_verify.json()
@@ -48,7 +48,7 @@ async def test_otp_flow(client):
 async def test_refresh_token_flow(client):
     response_verify = await client.post(
         "/api/v1/auth/otp/verify", 
-        json={"phone": "+918888888888", "otp": "123456"}
+        json={"email": "resident@cohabitat.com", "otp": "123456"}
     )
     assert response_verify.status_code == 200
     token_data = response_verify.json()
@@ -65,7 +65,7 @@ async def test_refresh_token_flow(client):
 
 @pytest.mark.asyncio
 async def test_read_profile(client):
-    headers = await get_auth_headers(client, "+918888888888")  # Amit Kumar
+    headers = await get_auth_headers(client, "resident@cohabitat.com")  # Amit Kumar
     response = await client.get("/api/v1/users/me", headers=headers)
     assert response.status_code == 200
     profile = response.json()
@@ -76,7 +76,7 @@ async def test_read_profile(client):
 @pytest.mark.asyncio
 async def test_admin_rbac_protection(client):
     # A resident should not be allowed to register a flat
-    resident_headers = await get_auth_headers(client, "+918888888888")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
     response = await client.post(
         "/api/v1/users/flats", 
         headers=resident_headers, 
@@ -85,7 +85,7 @@ async def test_admin_rbac_protection(client):
     assert response.status_code == 403
     
     # Admin should be allowed
-    admin_headers = await get_auth_headers(client, "+919999999999")
+    admin_headers = await get_auth_headers(client, "admin@cohabitat.com")
     response_admin = await client.post(
         "/api/v1/users/flats", 
         headers=admin_headers, 
@@ -97,8 +97,8 @@ async def test_admin_rbac_protection(client):
 
 @pytest.mark.asyncio
 async def test_billing_and_payment_flow(client, db_session):
-    admin_headers = await get_auth_headers(client, "+919999999999")
-    resident_headers = await get_auth_headers(client, "+918888888888")
+    admin_headers = await get_auth_headers(client, "admin@cohabitat.com")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
     
     # 1. Fetch Amit's Flat ID
     res = await db_session.execute(select(Flat).where(Flat.block == "A", Flat.flat_number == "101"))
@@ -150,8 +150,8 @@ async def test_billing_and_payment_flow(client, db_session):
 
 @pytest.mark.asyncio
 async def test_notices_and_polling_flow(client, db_session):
-    admin_headers = await get_auth_headers(client, "+919999999999")
-    resident_headers = await get_auth_headers(client, "+918888888888")
+    admin_headers = await get_auth_headers(client, "admin@cohabitat.com")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
     
     # 1. Admin creates a poll notice
     response_poll = await client.post(
@@ -194,12 +194,12 @@ async def test_notices_and_polling_flow(client, db_session):
     updated_poll = response_detail.json()
     opt1 = next(o for o in updated_poll["poll_options"] if o["id"] == opt1_id)
     assert opt1["vote_count"] == 1
-
-
+ 
+ 
 @pytest.mark.asyncio
 async def test_visitor_pass_and_gate_flow(client, db_session):
-    resident_headers = await get_auth_headers(client, "+918888888888")
-    guard_headers = await get_auth_headers(client, "+916666666666")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
+    guard_headers = await get_auth_headers(client, "guard@cohabitat.com")
     
     # 1. Fetch Amit's Flat ID
     res = await db_session.execute(select(Flat).where(Flat.block == "A", Flat.flat_number == "101"))

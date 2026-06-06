@@ -17,18 +17,17 @@ router = APIRouter()
 @router.post("/otp/request", status_code=status.HTTP_200_OK)
 async def request_otp(payload: OTPRequest):
     """
-    Generate and 'send' a mock OTP to the provided phone number.
-    In development, the OTP is printed to the terminal logs.
+    Generate and send an OTP to the provided email address.
     """
-    phone = payload.phone.strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="Phone number is required")
+    email = payload.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
         
     # Generate OTP (stored in Redis or in-memory fallback)
-    otp = await security.generate_otp(phone)
+    otp = await security.generate_otp(email)
     
     return {
-        "message": f"OTP sent successfully to {phone}",
+        "message": f"OTP sent successfully to {email}",
         "otp": otp if settings.ENVIRONMENT == "development" else "sent"
     }
 
@@ -39,13 +38,13 @@ async def verify_otp(payload: OTPVerify, db: AsyncSession = Depends(get_db)):
     Verify the OTP. If correct, generate a JWT.
     Auto-registers the user as a resident if not already present.
     """
-    phone = payload.phone.strip()
+    email = payload.email.strip().lower()
     otp = payload.otp.strip()
     
-    if not await security.verify_otp(phone, otp):
+    if not await security.verify_otp(email, otp):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid phone number or OTP",
+            detail="Invalid email or OTP",
         )
         
     # Obtain transaction-level advisory lock to serialize auto-registration checks
@@ -53,7 +52,7 @@ async def verify_otp(payload: OTPVerify, db: AsyncSession = Depends(get_db)):
     await db.execute(text("SELECT pg_advisory_xact_lock(112233)"))
     
     # Retrieve user
-    user = await crud_users.get_user_by_phone(db, phone)
+    user = await crud_users.get_user_by_email(db, email)
     
     if not user:
         # Check if this is the first user in the DB. If so, make them an Admin.
@@ -65,13 +64,13 @@ async def verify_otp(payload: OTPVerify, db: AsyncSession = Depends(get_db)):
         user = await crud_users.create_user(
             db, 
             UserCreate(
-                phone=phone, 
-                name=f"Demo {role.capitalize()} {phone[-4:]}", 
+                email=email, 
+                name=f"Demo {role.capitalize()} ({email.split('@')[0]})", 
                 role=role
             )
         )
         await db.commit()  # commit within lock to ensure count is updated for others
-        print(f"[AUTH] Auto-registered new user: {phone} with role: {role}")
+        print(f"[AUTH] Auto-registered new user: {email} with role: {role}")
         
     # Generate JWT access and refresh tokens
     access_token = security.create_access_token(subject=user.id, roles=user.role)
