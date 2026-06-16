@@ -1,6 +1,6 @@
 import uuid
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
@@ -15,7 +15,7 @@ router = APIRouter()
 
 
 @router.post("/otp/request", status_code=status.HTTP_200_OK)
-async def request_otp(payload: OTPRequest):
+async def request_otp(payload: OTPRequest, request: Request):
     """
     Generate and send an OTP to the provided email address.
     """
@@ -23,12 +23,23 @@ async def request_otp(payload: OTPRequest):
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
         
+    # Apply backend rate limiting per email and IP
+    if not await security.check_otp_rate_limit(email, request.client.host):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many OTP requests. Please try again after 5 minutes."
+        )
+        
     # Generate OTP (stored in Redis or in-memory fallback)
     otp = await security.generate_otp(email)
     
+    # Print the mock OTP to standard output in development mode instead of exposing it in JSON
+    if settings.ENVIRONMENT == "development":
+        print(f"\n[DEVELOPMENT MOCK OTP] Generated OTP for {email}: {otp}\n")
+        
     return {
         "message": f"OTP sent successfully to {email}",
-        "otp": otp if settings.ENVIRONMENT == "development" else "sent"
+        "otp": "sent"
     }
 
 

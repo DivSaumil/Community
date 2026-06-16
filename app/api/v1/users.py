@@ -17,15 +17,8 @@ router = APIRouter()
 admin_required = RoleChecker(["admin"])
 
 
-async def enrich_user_out(db: AsyncSession, db_user: User) -> UserOut:
-    """Helper to load flat relations and construct enriched UserOut schema."""
-    result = await db.execute(
-        select(User)
-        .where(User.id == db_user.id)
-        .options(selectinload(User.owned_flats), selectinload(User.rented_flats))
-    )
-    user = result.scalar_one()
-    
+def enrich_user_schema(user: User) -> UserOut:
+    """Helper to construct enriched UserOut schema from a User object that already has loaded flat relations."""
     flats_list = []
     for f in user.owned_flats:
         flats_list.append(f"{f.block}-{f.flat_number}")
@@ -35,6 +28,17 @@ async def enrich_user_out(db: AsyncSession, db_user: User) -> UserOut:
     user_out = UserOut.model_validate(user)
     user_out.flats = sorted(list(set(flats_list)))
     return user_out
+
+
+async def enrich_user_out(db: AsyncSession, db_user: User) -> UserOut:
+    """Helper to load flat relations and construct enriched UserOut schema."""
+    result = await db.execute(
+        select(User)
+        .where(User.id == db_user.id)
+        .options(selectinload(User.owned_flats), selectinload(User.rented_flats))
+    )
+    user = result.scalar_one()
+    return enrich_user_schema(user)
 
 
 @router.get("/me", response_model=UserOut)
@@ -145,9 +149,10 @@ async def list_society_staff(
     current_user: User = Depends(get_current_user)
 ):
     """List all staff/vendor accounts (e.g. electricians, plumbers)."""
-    result = await db.execute(select(User).where(User.role == "staff"))
+    result = await db.execute(
+        select(User)
+        .where(User.role == "staff")
+        .options(selectinload(User.owned_flats), selectinload(User.rented_flats))
+    )
     users = result.scalars().all()
-    enriched = []
-    for u in users:
-        enriched.append(await enrich_user_out(db, u))
-    return enriched
+    return [enrich_user_schema(u) for u in users]

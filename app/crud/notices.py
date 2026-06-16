@@ -39,12 +39,17 @@ async def get_notice(db: AsyncSession, notice_id: uuid.UUID) -> Notice | None:
     if not notice:
         return None
         
-    # Populate vote counts dynamically
-    for opt in notice.poll_options:
+    # Populate vote counts dynamically in a single query
+    if notice.poll_options:
+        option_ids = [opt.id for opt in notice.poll_options]
         vote_res = await db.execute(
-            select(func.count(PollVote.id)).where(PollVote.option_id == opt.id)
+            select(PollVote.option_id, func.count(PollVote.id))
+            .where(PollVote.option_id.in_(option_ids))
+            .group_by(PollVote.option_id)
         )
-        opt.vote_count = vote_res.scalar() or 0
+        vote_counts = {opt_id: count for opt_id, count in vote_res.all()}
+        for opt in notice.poll_options:
+            opt.vote_count = vote_counts.get(opt.id, 0)
         
     return notice
 
@@ -65,13 +70,21 @@ async def get_all_notices(
     result = await db.execute(query)
     notices = list(result.scalars().all())
     
-    # Populate vote counts dynamically
+    # Populate vote counts dynamically in a single query
+    option_ids = [opt.id for notice in notices for opt in notice.poll_options]
+    if option_ids:
+        vote_res = await db.execute(
+            select(PollVote.option_id, func.count(PollVote.id))
+            .where(PollVote.option_id.in_(option_ids))
+            .group_by(PollVote.option_id)
+        )
+        vote_counts = {opt_id: count for opt_id, count in vote_res.all()}
+    else:
+        vote_counts = {}
+        
     for notice in notices:
         for opt in notice.poll_options:
-            vote_res = await db.execute(
-                select(func.count(PollVote.id)).where(PollVote.option_id == opt.id)
-            )
-            opt.vote_count = vote_res.scalar() or 0
+            opt.vote_count = vote_counts.get(opt.id, 0)
             
     return notices
 

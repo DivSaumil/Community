@@ -206,3 +206,59 @@ async def verify_otp(email: str, otp: str) -> bool:
             return True
             
     return False
+
+
+# Rate limiting store for in-memory fallback
+RATE_LIMIT_STORE: Dict[str, list[datetime]] = {}
+
+
+def check_in_memory_limit(key: str, limit: int, window: int = 300) -> bool:
+    """Check in-memory rate limits."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(seconds=window)
+    
+    # Get and clean old requests
+    requests = RATE_LIMIT_STORE.get(key, [])
+    requests = [t for t in requests if t > cutoff]
+    
+    if len(requests) >= limit:
+        RATE_LIMIT_STORE[key] = requests
+        return False
+        
+    requests.append(now)
+    RATE_LIMIT_STORE[key] = requests
+    return True
+
+
+async def check_otp_rate_limit(email: str, ip: str) -> bool:
+    """
+    Rate limit OTP requests:
+    - Max 3 requests per 5 minutes per email
+    - Max 5 requests per 5 minutes per IP
+    """
+    redis_client = await get_redis_client()
+    if redis_client:
+        try:
+            email_key = f"rl:email:{email}"
+            ip_key = f"rl:ip:{ip}"
+            
+            # Increment and set TTL if new
+            e_count = await redis_client.incr(email_key)
+            if e_count == 1:
+                await redis_client.expire(email_key, 300)
+                
+            ip_count = await redis_client.incr(ip_key)
+            if ip_count == 1:
+                await redis_client.expire(ip_key, 300)
+                
+            if e_count > 3 or ip_count > 5:
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Redis rate limiting failed: {e}. Falling back to in-memory.")
+            
+    # In-memory fallback
+    email_ok = check_in_memory_limit(f"email:{email}", limit=3)
+    ip_ok = check_in_memory_limit(f"ip:{ip}", limit=5)
+    return email_ok and ip_ok
+

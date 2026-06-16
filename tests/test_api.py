@@ -30,12 +30,12 @@ async def test_otp_flow(client):
     assert response.status_code == 200
     data = response.json()
     assert "otp" in data
-    otp = data["otp"]
+    assert data["otp"] == "sent"  # OTP is never exposed in the response
     
-    # 2. Verify OTP
+    # 2. Verify OTP (use the master mock OTP '123456' for development/test environment)
     response_verify = await client.post(
         "/api/v1/auth/otp/verify", 
-        json={"email": "new_resident@cohabitat.com", "otp": otp}
+        json={"email": "new_resident@cohabitat.com", "otp": "123456"}
     )
     assert response_verify.status_code == 200
     token_data = response_verify.json()

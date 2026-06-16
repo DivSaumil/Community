@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
 from app.models.finance import Invoice, Payment, Expense, Budget
 from app.schemas.finance import InvoiceCreate, PaymentCreate, ExpenseCreate, BudgetCreate
 
@@ -52,10 +53,15 @@ async def create_payment(db: AsyncSession, payment_in: PaymentCreate, user_id: u
     if not invoice:
         return None
         
-    # Ensure receipt number sequence exists and get next value
-    await db.execute(text("CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1000"))
-    seq_res = await db.execute(text("SELECT nextval('receipt_number_seq')"))
-    seq_val = seq_res.scalar()
+    if "sqlite" in settings.DATABASE_URL:
+        # SQLite fallback: timestamp-based sequence value
+        import time
+        seq_val = int(time.time() * 1000) % 1000000
+    else:
+        # Ensure receipt number sequence exists and get next value
+        await db.execute(text("CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1000"))
+        seq_res = await db.execute(text("SELECT nextval('receipt_number_seq')"))
+        seq_val = seq_res.scalar()
     
     receipt_num = f"REC-{datetime.now().strftime('%Y%m%d')}-{seq_val}"
     
