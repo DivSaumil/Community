@@ -3,7 +3,7 @@
 # Installs all Python dependencies into a dedicated prefix
 # so the runtime image stays lean and has no build tools.
 # ──────────────────────────────────────────────────────────
-FROM python:3.14-rc-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 # Prevents Python from writing .pyc files and enables unbuffered logs
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -31,7 +31,7 @@ RUN pip install --prefix=/install --no-cache-dir -r requirements.txt
 # Stage 2: runtime
 # Lean production image — no compiler, no build artifacts.
 # ──────────────────────────────────────────────────────────
-FROM python:3.14-rc-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

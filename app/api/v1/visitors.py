@@ -15,6 +15,7 @@ from app.schemas.visitors import (
     VisitorLogCreate,
     DailyHelpOut,
     DailyHelpCreate,
+    DailyHelpCreateByResident,
 )
 
 router = APIRouter()
@@ -135,7 +136,7 @@ async def register_daily_help(payload: DailyHelpCreate, db: AsyncSession = Depen
         "pass_code": db_help.pass_code,
         "is_active": db_help.is_active,
         "created_at": db_help.created_at,
-        "flats": [f.id for f in db_help.flats]
+        "flats": [f"{f.block}-{f.flat_number}" for f in db_help.flats]
     }
 
 
@@ -158,6 +159,148 @@ async def list_daily_help(
             "pass_code": h.pass_code,
             "is_active": h.is_active,
             "created_at": h.created_at,
-            "flats": [f.id for f in h.flats]
+            "flats": [f"{f.block}-{f.flat_number}" for f in h.flats]
         })
     return out
+
+
+@router.post("/daily-help/register-by-resident", response_model=DailyHelpOut)
+async def register_daily_help_by_resident(
+    payload: DailyHelpCreateByResident,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Register daily help staff (maid, driver) and link to resident's flat."""
+    from sqlalchemy import or_
+    
+    # Find resident's flat
+    flat_res = await db.execute(
+        select(Flat).where(or_(Flat.owner_id == current_user.id, Flat.tenant_id == current_user.id))
+    )
+    flat = flat_res.scalars().first()
+    if not flat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You must be associated with a flat to register daily help",
+        )
+    
+    # Convert to DailyHelpCreate schema
+    create_payload = DailyHelpCreate(
+        name=payload.name,
+        phone=payload.phone,
+        role=payload.role,
+        flat_ids=[flat.id]
+    )
+    
+    db_help = await crud_visitors.create_daily_help(db, create_payload)
+    return {
+        "id": db_help.id,
+        "name": db_help.name,
+        "phone": db_help.phone,
+        "role": db_help.role,
+        "pass_code": db_help.pass_code,
+        "is_active": db_help.is_active,
+        "created_at": db_help.created_at,
+        "flats": [f"{f.block}-{f.flat_number}" for f in db_help.flats]
+    }
+
+
+@router.post("/daily-help/{help_id}/link", response_model=DailyHelpOut)
+async def link_daily_help_to_flat(
+    help_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Link an existing daily helper to the resident's flat."""
+    from sqlalchemy import or_
+    from app.models.visitors import DailyHelp, DailyHelpFlat
+    
+    # Find helper
+    help_res = await db.execute(select(DailyHelp).where(DailyHelp.id == help_id))
+    db_help = help_res.scalar_one_or_none()
+    if not db_help:
+        raise HTTPException(status_code=404, detail="Daily help not found")
+        
+    # Find flat
+    flat_res = await db.execute(
+        select(Flat).where(or_(Flat.owner_id == current_user.id, Flat.tenant_id == current_user.id))
+    )
+    flat = flat_res.scalars().first()
+    if not flat:
+        raise HTTPException(status_code=400, detail="No flat associated with your profile")
+        
+    # Check if already linked
+    existing = await db.execute(
+        select(DailyHelpFlat).where(
+            DailyHelpFlat.daily_help_id == help_id,
+            DailyHelpFlat.flat_id == flat.id
+        )
+    )
+    if not existing.scalar_one_or_none():
+        association = DailyHelpFlat(daily_help_id=help_id, flat_id=flat.id)
+        db.add(association)
+        await db.commit()
+        
+    # Refresh and return
+    await db.refresh(db_help, ["flats"])
+    return {
+        "id": db_help.id,
+        "name": db_help.name,
+        "phone": db_help.phone,
+        "role": db_help.role,
+        "pass_code": db_help.pass_code,
+        "is_active": db_help.is_active,
+        "created_at": db_help.created_at,
+        "flats": [f"{f.block}-{f.flat_number}" for f in db_help.flats]
+    }
+
+
+@router.post("/daily-help/{help_id}/unlink", response_model=DailyHelpOut)
+async def unlink_daily_help_from_flat(
+    help_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Unlink a daily helper from the resident's flat."""
+    from sqlalchemy import or_
+    from app.models.visitors import DailyHelp, DailyHelpFlat
+    
+    # Find helper
+    help_res = await db.execute(select(DailyHelp).where(DailyHelp.id == help_id))
+    db_help = help_res.scalar_one_or_none()
+    if not db_help:
+        raise HTTPException(status_code=404, detail="Daily help not found")
+        
+    # Find flat
+    flat_res = await db.execute(
+        select(Flat).where(or_(Flat.owner_id == current_user.id, Flat.tenant_id == current_user.id))
+    )
+    flat = flat_res.scalars().first()
+    if not flat:
+        raise HTTPException(status_code=400, detail="No flat associated with your profile")
+        
+    # Delete association
+    assoc_res = await db.execute(
+        select(DailyHelpFlat).where(
+            DailyHelpFlat.daily_help_id == help_id,
+            DailyHelpFlat.flat_id == flat.id
+        )
+    )
+    association = assoc_res.scalar_one_or_none()
+    if association:
+        await db.delete(association)
+        await db.commit()
+        
+    # Refresh and return
+    await db.refresh(db_help, ["flats"])
+    return {
+        "id": db_help.id,
+        "name": db_help.name,
+        "phone": db_help.phone,
+        "role": db_help.role,
+        "pass_code": db_help.pass_code,
+        "is_active": db_help.is_active,
+        "created_at": db_help.created_at,
+        "flats": [f"{f.block}-{f.flat_number}" for f in db_help.flats]
+    }
+

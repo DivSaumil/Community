@@ -247,3 +247,234 @@ async def test_visitor_pass_and_gate_flow(client, db_session):
     )
     assert response_checkout.status_code == 200
     assert response_checkout.json()["exit_time"] is not None
+
+
+@pytest.mark.asyncio
+async def test_user_signup_flow(client):
+    # 1. Request OTP for unregistered email
+    response_req = await client.post(
+        "/api/v1/auth/otp/request", 
+        json={"email": "johndoe@example.com"}
+    )
+    assert response_req.status_code == 200
+    
+    # 2. Verify OTP (should fail with 404 since it's not a cohabitat email and not registered)
+    response_verify = await client.post(
+        "/api/v1/auth/otp/verify",
+        json={"email": "johndoe@example.com", "otp": "123456"}
+    )
+    assert response_verify.status_code == 404
+    assert response_verify.json()["detail"] == "EMAIL_NOT_REGISTERED"
+    
+    # 3. Register user using /auth/register
+    response_reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "John Doe",
+            "email": "johndoe@example.com",
+            "role": "resident",
+            "block": "X",
+            "flat_number": "999",
+            "vehicle_number": "KA-05-AA-1234",
+            "otp": "123456"
+        }
+    )
+    assert response_reg.status_code == 200
+    token_data = response_reg.json()
+    assert "access_token" in token_data
+    assert token_data["role"] == "resident"
+    
+    # 4. Read profile to ensure it has flat X-999
+    headers = {"Authorization": f"Bearer {token_data['access_token']}"}
+    response_me = await client.get("/api/v1/users/me", headers=headers)
+    assert response_me.status_code == 200
+    profile = response_me.json()
+    assert profile["name"] == "John Doe"
+    assert "X-999" in profile["flats"]
+
+
+@pytest.mark.asyncio
+async def test_daily_help_resident_flow(client):
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
+    
+    # 1. Resident registers a new daily helper
+    response_reg = await client.post(
+        "/api/v1/visitors/daily-help/register-by-resident",
+        headers=resident_headers,
+        json={
+            "name": "Kamla Bai",
+            "phone": "+919876543210",
+            "role": "Maid"
+        }
+    )
+    assert response_reg.status_code == 200
+    helper = response_reg.json()
+    assert helper["name"] == "Kamla Bai"
+    assert helper["role"] == "Maid"
+    assert "A-101" in helper["flats"]  # resident@cohabitat.com is resident of A-101
+    
+    helper_id = helper["id"]
+    
+    # 2. Unlink helper from flat
+    response_unlink = await client.post(
+        f"/api/v1/visitors/daily-help/{helper_id}/unlink",
+        headers=resident_headers
+    )
+    assert response_unlink.status_code == 200
+    unlinked_helper = response_unlink.json()
+    assert "A-101" not in unlinked_helper["flats"]
+    
+    # 3. Link helper back to flat
+    response_link = await client.post(
+        f"/api/v1/visitors/daily-help/{helper_id}/link",
+        headers=resident_headers
+    )
+    assert response_link.status_code == 200
+    linked_helper = response_link.json()
+    assert "A-101" in linked_helper["flats"]
+
+
+@pytest.mark.asyncio
+async def test_admin_user_management_flow(client):
+    admin_headers = await get_auth_headers(client, "admin@cohabitat.com")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
+    
+    # 1. Non-admin tries to list all users (should fail with 403)
+    response_list_fail = await client.get("/api/v1/users", headers=resident_headers)
+    assert response_list_fail.status_code == 403
+    
+    # 2. Admin lists all users
+    response_list = await client.get("/api/v1/users", headers=admin_headers)
+    assert response_list.status_code == 200
+    users = response_list.json()
+    assert len(users) > 0
+    
+    # Find Amit Kumar (resident@cohabitat.com)
+    resident_user = next(u for u in users if u["email"] == "resident@cohabitat.com")
+    resident_id = resident_user["id"]
+    
+    # 3. Admin updates Amit's role to admin
+    response_update = await client.put(
+        f"/api/v1/users/{resident_id}",
+        headers=admin_headers,
+        json={"role": "admin"}
+    )
+    assert response_update.status_code == 200
+    updated_user = response_update.json()
+    assert updated_user["role"] == "admin"
+
+
+@pytest.mark.asyncio
+async def test_notices_crud_flow(client):
+    admin_headers = await get_auth_headers(client, "admin@cohabitat.com")
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
+    
+    # 1. Create a notice
+    response_create = await client.post(
+        "/api/v1/notices",
+        headers=admin_headers,
+        json={
+            "title": "Initial Notice",
+            "content": "This is the content",
+            "type": "general"
+        }
+    )
+    assert response_create.status_code == 201
+    notice = response_create.json()
+    notice_id = notice["id"]
+    
+    # 2. Resident tries to edit notice (should fail 403)
+    response_edit_fail = await client.put(
+        f"/api/v1/notices/{notice_id}",
+        headers=resident_headers,
+        json={"title": "Resident Edit"}
+    )
+    assert response_edit_fail.status_code == 403
+    
+    # 3. Admin edits notice
+    response_edit = await client.put(
+        f"/api/v1/notices/{notice_id}",
+        headers=admin_headers,
+        json={"title": "Updated Notice Title", "content": "Updated content"}
+    )
+    assert response_edit.status_code == 200
+    updated = response_edit.json()
+    assert updated["title"] == "Updated Notice Title"
+    
+    # 4. Resident tries to delete (should fail 403)
+    response_delete_fail = await client.delete(
+        f"/api/v1/notices/{notice_id}",
+        headers=resident_headers
+    )
+    assert response_delete_fail.status_code == 403
+    
+    # 5. Admin deletes notice
+    response_delete = await client.delete(
+        f"/api/v1/notices/{notice_id}",
+        headers=admin_headers
+    )
+    assert response_delete.status_code == 204
+    
+    # 6. Fetching it should fail 404
+    response_get = await client.get(f"/api/v1/notices/{notice_id}", headers=admin_headers)
+    assert response_get.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_family_member_flow(client):
+    resident_headers = await get_auth_headers(client, "resident@cohabitat.com")
+    
+    # 1. List family members (should be empty initially)
+    response_list = await client.get("/api/v1/users/me/family", headers=resident_headers)
+    assert response_list.status_code == 200
+    assert len(response_list.json()) == 0
+    
+    # 2. Add family member
+    response_add = await client.post(
+        "/api/v1/users/me/family",
+        headers=resident_headers,
+        json={
+            "name": "Wife Jane",
+            "relation": "Spouse",
+            "phone": "+91 99999 88888"
+        }
+    )
+    assert response_add.status_code == 201
+    member = response_add.json()
+    assert member["name"] == "Wife Jane"
+    assert member["relation"] == "Spouse"
+    member_id = member["id"]
+    
+    # 3. List family members again (should have 1 item)
+    response_list2 = await client.get("/api/v1/users/me/family", headers=resident_headers)
+    assert response_list2.status_code == 200
+    assert len(response_list2.json()) == 1
+    assert response_list2.json()[0]["name"] == "Wife Jane"
+    
+    # 4. Update family member details
+    response_update = await client.put(
+        f"/api/v1/users/me/family/{member_id}",
+        headers=resident_headers,
+        json={
+            "name": "Jane Doe",
+            "relation": "Spouse",
+            "phone": "+91 99999 77777"
+        }
+    )
+    assert response_update.status_code == 200
+    assert response_update.json()["name"] == "Jane Doe"
+    assert response_update.json()["phone"] == "+91 99999 77777"
+    
+    # 5. Delete family member
+    response_delete = await client.delete(
+        f"/api/v1/users/me/family/{member_id}",
+        headers=resident_headers
+    )
+    assert response_delete.status_code == 204
+    
+    # 6. List family members should be empty again
+    response_list3 = await client.get("/api/v1/users/me/family", headers=resident_headers)
+    assert response_list3.status_code == 200
+    assert len(response_list3.json()) == 0
+
+

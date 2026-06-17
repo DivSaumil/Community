@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, RoleChecker
 from app.crud import notices as crud_notices
 from app.models.users import User
-from app.schemas.notices import NoticeOut, NoticeCreate, VoteOut, VoteCreate
+from app.schemas.notices import NoticeOut, NoticeCreate, NoticeUpdate, VoteOut, VoteCreate
 
 router = APIRouter()
 
@@ -87,3 +87,44 @@ async def cast_vote(
         )
         
     return vote
+
+
+@router.put("/{notice_id}", response_model=NoticeOut)
+async def update_notice_by_id(
+    notice_id: uuid.UUID,
+    payload: NoticeUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update notice/feed details. Restricted to the author or admin."""
+    notice = await crud_notices.get_notice(db, notice_id)
+    if not notice:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    if current_user.role != "admin" and notice.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to update this notice"
+        )
+    return await crud_notices.update_notice(db, notice_id, payload)
+
+
+@router.delete("/{notice_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_notice_by_id(
+    notice_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a notice. Restricted to the author or admin."""
+    notice = await crud_notices.get_notice(db, notice_id)
+    if not notice:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    if current_user.role != "admin" and notice.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to delete this notice"
+        )
+    success = await crud_notices.delete_notice(db, notice_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    return
+

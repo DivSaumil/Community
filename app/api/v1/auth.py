@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.crud import users as crud_users
 from app.models.users import User
-from app.schemas.users import OTPRequest, OTPVerify, Token, UserCreate
+from app.schemas.users import OTPRequest, OTPVerify, Token, UserCreate, UserRegister
 
 router = APIRouter()
 
@@ -66,23 +66,85 @@ async def verify_otp(payload: OTPVerify, db: AsyncSession = Depends(get_db)):
     user = await crud_users.get_user_by_email(db, email)
     
     if not user:
-        # Check if this is the first user in the DB. If so, make them an Admin.
-        # Otherwise, make them a resident.
-        res = await db.execute(select(func.count(User.id)))
-        count = res.scalar() or 0
-        
-        role = "admin" if count == 0 else "resident"
-        user = await crud_users.create_user(
-            db, 
-            UserCreate(
-                email=email, 
-                name=f"Demo {role.capitalize()} ({email.split('@')[0]})", 
-                role=role
+        if email.endswith("@cohabitat.com"):
+            # Check if this is the first user in the DB. If so, make them an Admin.
+            # Otherwise, make them a resident.
+            res = await db.execute(select(func.count(User.id)))
+            count = res.scalar() or 0
+            
+            role = "admin" if count == 0 else "resident"
+            user = await crud_users.create_user(
+                db, 
+                UserCreate(
+                    email=email, 
+                    name=f"Demo {role.capitalize()} ({email.split('@')[0]})", 
+                    role=role
+                )
             )
-        )
-        await db.commit()  # commit within lock to ensure count is updated for others
-        print(f"[AUTH] Auto-registered new user: {email} with role: {role}")
+            await db.commit()  # commit within lock to ensure count is updated for others
+            print(f"[AUTH] Auto-registered new user: {email} with role: {role}")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="EMAIL_NOT_REGISTERED",
+            )
         
+    # Generate JWT access and refresh tokens
+    access_token = security.create_access_token(subject=user.id, roles=user.role)
+    refresh_token = security.create_refresh_token(subject=user.id)
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "role": user.role,
+        "user_id": user.id,
+    }
+
+
+@router.post("/register", response_model=Token)
+async def register_user(payload: UserRegister, db: AsyncSession = Depends(get_db)):
+    """
+    Register a new user after verifying their email OTP.
+    Creates user profile and maps them to a Flat.
+    """
+    email = payload.email.strip().lower()
+    otp = payload.otp.strip()
+    
+    if not await security.verify_otp(email, otp):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP",
+        )
+        
+    await db.execute(text("SELECT pg_advisory_xact_lock(112233)"))
+    
+    # Check if user already exists
+    user = await crud_users.get_user_by_email(db, email)
+    if user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email address already registered",
+        )
+        
+    # Check if first user
+    res = await db.execute(select(func.count(User.id)))
+    count = res.scalar() or 0
+    role = "admin" if count == 0 else payload.role.value
+    
+    # Create the user and link to Flat
+    user = await crud_users.create_user(
+        db,
+        UserCreate(
+            email=email,
+            name=payload.name,
+            role=role,
+            block=payload.block,
+            flat_number=payload.flat_number,
+            vehicle_number=payload.vehicle_number,
+        )
+    )
+    
     # Generate JWT access and refresh tokens
     access_token = security.create_access_token(subject=user.id, roles=user.role)
     refresh_token = security.create_refresh_token(subject=user.id)

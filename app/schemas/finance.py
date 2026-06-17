@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class InvoiceCreate(BaseModel):
-    flat_id: uuid.UUID
+    flat_id: uuid.UUID | str
     title: str = Field(..., max_length=200, examples=["Maintenance Fee - May 2026"])
     amount: Decimal = Field(..., gt=0)
     due_date: date

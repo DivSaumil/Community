@@ -32,6 +32,7 @@ class User(Base):
     poll_votes: Mapped[list["PollVote"]] = relationship("PollVote", back_populates="user")
     visitor_passes: Mapped[list["VisitorPass"]] = relationship("VisitorPass", back_populates="resident")
     payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="paid_by")
+    family_members: Mapped[list["FamilyMember"]] = relationship("FamilyMember", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("role IN ('admin', 'resident', 'tenant', 'security', 'staff')", name="chk_user_role"),
@@ -66,4 +67,20 @@ class Flat(Base):
     __table_args__ = (
         UniqueConstraint("block", "flat_number", name="uq_block_flat_number"),
     )
+
+
+class FamilyMember(Base):
+    __tablename__ = "family_members"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    relation: Mapped[str] = mapped_column(String(50), nullable=False)  # Spouse, Child, Parent, Sibling, Other
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    user: Mapped["User"] = relationship("User", back_populates="family_members")
+
 

@@ -44,6 +44,32 @@ async def create_maintenance_invoice(
     current_user: User = Depends(get_current_user)
 ):
     """Generate maintenance billing invoice for a flat. Admin only."""
+    flat_id_str = str(payload.flat_id).strip()
+    flat = None
+    
+    # Try parsing as UUID first
+    try:
+        flat_uuid = uuid.UUID(flat_id_str)
+        flat_query = select(Flat).where(Flat.id == flat_uuid)
+        flat_res = await db.execute(flat_query)
+        flat = flat_res.scalar_one_or_none()
+    except ValueError:
+        # Try parsing as block-flat_number (e.g., "B-204" or "b-204")
+        parts = flat_id_str.split('-')
+        if len(parts) == 2:
+            block, flat_num = parts[0].strip(), parts[1].strip()
+            flat_query = select(Flat).where(Flat.block.ilike(block), Flat.flat_number.ilike(flat_num))
+            flat_res = await db.execute(flat_query)
+            flat = flat_res.scalar_one_or_none()
+            
+    if not flat:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Flat '{payload.flat_id}' not found. Must be valid UUID or format Block-Number (e.g. B-204)."
+        )
+        
+    # Set the resolved UUID in the payload before passing it to CRUD
+    payload.flat_id = flat.id
     return await crud_finance.create_invoice(db, payload, current_user.id)
 
 

@@ -4,7 +4,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.notices import Notice, PollOption, PollVote
-from app.schemas.notices import NoticeCreate
+from app.schemas.notices import NoticeCreate, NoticeUpdate
 
 
 async def create_notice(db: AsyncSession, notice_in: NoticeCreate, admin_id: uuid.UUID) -> Notice:
@@ -108,3 +108,30 @@ async def vote_poll_option(
     await db.commit()
     await db.refresh(db_vote)
     return db_vote
+
+
+async def update_notice(
+    db: AsyncSession, notice_id: uuid.UUID, notice_in: NoticeUpdate
+) -> Notice | None:
+    notice = await get_notice(db, notice_id)
+    if not notice:
+        return None
+    if notice_in.title is not None:
+        notice.title = notice_in.title
+    if notice_in.content is not None:
+        notice.content = notice_in.content
+    if notice_in.expires_at is not None:
+        notice.expires_at = notice_in.expires_at
+    await db.commit()
+    await db.refresh(notice)
+    return notice
+
+
+async def delete_notice(db: AsyncSession, notice_id: uuid.UUID) -> bool:
+    notice = await get_notice(db, notice_id)
+    if not notice:
+        return False
+    await db.delete(notice)
+    await db.commit()
+    return True
+

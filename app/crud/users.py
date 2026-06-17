@@ -20,8 +20,23 @@ async def create_user(db: AsyncSession, user_in: UserCreate) -> User:
         email=user_in.email,
         name=user_in.name,
         role=user_in.role,
+        vehicle_number=user_in.vehicle_number,
     )
     db.add(db_user)
+    await db.flush()
+
+    if user_in.block and user_in.flat_number:
+        flat = await get_flat_by_details(db, user_in.block, user_in.flat_number)
+        if not flat:
+            flat = Flat(block=user_in.block, flat_number=user_in.flat_number)
+            db.add(flat)
+            await db.flush()
+        
+        if user_in.role == "resident" or user_in.role == "admin":
+            flat.owner_id = db_user.id
+        elif user_in.role == "tenant":
+            flat.tenant_id = db_user.id
+
     await db.commit()
     await db.refresh(db_user)
     return db_user
@@ -36,9 +51,41 @@ async def update_user(db: AsyncSession, db_user: User, user_in: UserUpdate) -> U
         db_user.is_active = user_in.is_active
     if hasattr(user_in, "vehicle_number") and user_in.vehicle_number is not None:
         db_user.vehicle_number = user_in.vehicle_number
+
+    # Handle flat update
+    if user_in.block is not None and user_in.flat_number is not None:
+        # 1. Unassign from old flats
+        from sqlalchemy import or_
+        old_flats_res = await db.execute(
+            select(Flat).where(or_(Flat.owner_id == db_user.id, Flat.tenant_id == db_user.id))
+        )
+        old_flats = old_flats_res.scalars().all()
+        for f in old_flats:
+            if f.owner_id == db_user.id:
+                f.owner_id = None
+            if f.tenant_id == db_user.id:
+                f.tenant_id = None
+        
+        # 2. Assign to new flat
+        block = user_in.block.strip()
+        flat_number = user_in.flat_number.strip()
+        if block and flat_number:
+            flat = await get_flat_by_details(db, block, flat_number)
+            if not flat:
+                flat = Flat(block=block, flat_number=flat_number)
+                db.add(flat)
+                await db.flush()
+            
+            role = user_in.role or db_user.role
+            if role == "resident" or role == "admin":
+                flat.owner_id = db_user.id
+            elif role == "tenant":
+                flat.tenant_id = db_user.id
+
     await db.commit()
     await db.refresh(db_user)
     return db_user
+
 
 
 async def get_flat(db: AsyncSession, flat_id: uuid.UUID) -> Flat | None:

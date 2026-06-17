@@ -39,7 +39,9 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    pass
+    block: str | None = None
+    flat_number: str | None = None
+    vehicle_number: str | None = None
 
 
 class UserUpdate(BaseModel):
@@ -47,6 +49,38 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     is_active: bool | None = None
     vehicle_number: str | None = None
+    block: str | None = None
+    flat_number: str | None = None
+
+
+class UserRegister(BaseModel):
+    name: str = Field(..., max_length=100)
+    email: EmailStr
+    role: UserRole = UserRole.RESIDENT
+    block: str = Field(..., max_length=20)
+    flat_number: str = Field(..., max_length=20)
+    vehicle_number: str | None = None
+    otp: str
+
+
+
+class FamilyMemberCreate(BaseModel):
+    name: str = Field(..., max_length=100, examples=["Sunita Sharma"])
+    relation: str = Field(..., max_length=50, examples=["Spouse"])
+    phone: str | None = Field(None, max_length=20, examples=["+91 98765 43210"])
+    email: EmailStr | None = None
+
+
+class FamilyMemberOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    relation: str
+    phone: str | None = None
+    email: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserOut(UserBase):
@@ -55,6 +89,8 @@ class UserOut(UserBase):
     vehicle_number: str | None = None
     created_at: datetime
     flats: list[str] = []
+    flats_detailed: list[FlatOut] = []
+    family_members: list[FamilyMemberOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -23,6 +23,13 @@ class NoticeCreate(BaseModel):
     poll_options: list[str] | None = Field(None, description="Only required if type is 'poll'")
 
 
+class NoticeUpdate(BaseModel):
+    title: str | None = Field(None, min_length=3, max_length=200)
+    content: str | None = Field(None, min_length=5)
+    expires_at: datetime | None = None
+
+
+
 class NoticeOut(BaseModel):
     id: uuid.UUID
     title: str

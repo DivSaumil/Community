@@ -53,8 +53,10 @@ async def seed_data() -> None:
         tenant_user = User(email="tenant@cohabitat.com", name="Suresh Patel", role="tenant", vehicle_number="KA-51-PH-9876")
         security_guard = User(email="guard@cohabitat.com", name="Ram Singh", role="security")
         staff_user = User(email="staff@cohabitat.com", name="Ravi Electrician", role="staff", vehicle_number="KA-04-E-5555")
+        staff_plumber = User(email="plumber@cohabitat.com", name="Sohan Plumber", role="staff", vehicle_number="KA-04-P-1111")
+        staff_caretaker = User(email="caretaker@cohabitat.com", name="Mahesh Caretaker", role="staff", vehicle_number="KA-04-C-2222")
         
-        session.add_all([admin, resident_user, tenant_user, security_guard, staff_user])
+        session.add_all([admin, resident_user, tenant_user, security_guard, staff_user, staff_plumber, staff_caretaker])
         await session.flush()  # Generate IDs
 
         print("Seeding Flats...")

@@ -198,7 +198,9 @@ async def create_daily_help(db: AsyncSession, help_in: DailyHelpCreate) -> Daily
         # Generate unique 6-digit recurring passcode starting with DH
         pass_code = "DH" + "".join([str(random.randint(0, 9)) for _ in range(4)])
         
+        help_id = uuid.uuid4()
         db_help = DailyHelp(
+            id=help_id,
             name=help_in.name,
             phone=help_in.phone,
             role=help_in.role,
@@ -209,7 +211,7 @@ async def create_daily_help(db: AsyncSession, help_in: DailyHelpCreate) -> Daily
         
         # Assign flats
         for f_id in help_in.flat_ids:
-            association = DailyHelpFlat(daily_help_id=db_help.id, flat_id=f_id)
+            association = DailyHelpFlat(daily_help_id=help_id, flat_id=f_id)
             db.add(association)
             
         try:

@@ -69,6 +69,12 @@ class DailyHelpCreate(BaseModel):
     flat_ids: list[uuid.UUID] = []
 
 
+class DailyHelpCreateByResident(BaseModel):
+    name: str = Field(..., max_length=100)
+    phone: str = Field(..., max_length=20)
+    role: str = Field(..., description="Maid, Driver, Cook, Gardener, etc.")
+
+
 class DailyHelpOut(BaseModel):
     id: uuid.UUID
     name: str
@@ -78,6 +84,6 @@ class DailyHelpOut(BaseModel):
     is_active: bool
     created_at: datetime
     
-    flats: list[uuid.UUID] = []
+    flats: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)
